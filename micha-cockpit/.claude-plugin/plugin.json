@@ -1,0 +1,10 @@
+{
+  "name": "micha-cockpit",
+  "version": "0.3.0",
+  "description": "Micha-Cockpit: Projekte, Sessions, Rechner und Remote Control auf einen Blick",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Michael Schmitz",
+    "email": "service@1a-schmitz.de"
+  }
+}

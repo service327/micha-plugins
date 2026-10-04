@@ -1,0 +1,15 @@
+{
+  "name": "micha-plugins",
+  "owner": {
+    "name": "Michael Schmitz",
+    "email": "service@1a-schmitz.de"
+  },
+  "plugins": [
+    {
+      "name": "micha-cockpit",
+      "source": "./micha-cockpit",
+      "description": "Micha-Cockpit: Projekte, Sessions, Rechner und Remote Control auf einen Blick"
+    }
+  ],
+  "description": "Michas eigene Claude-Code-Plugins"
+}
