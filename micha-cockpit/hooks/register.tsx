@@ -38,7 +38,7 @@ const data = atom({ plugin: 'micha-cockpit', key: 'data' } as const, DATA0)
 
 // Rechner und woran man sie im Session-Namen erkennt (vorläufig, bis es Anker-Sessions gibt)
 const MACHINES: { name: string; match: RegExp }[] = [
-  { name: 'PC Windows Computerzimmer', match: /computer ?zimmer|desktop-i4gdm3o/i },
+  { name: 'PC Windows Computerzimmer', match: /computer ?zimmer|desktop-b8rp1n5/i },
   { name: 'iMac Computerzimmer', match: /\bimac\b/i },
   { name: 'MacbookPro2019', match: /macbook|\bmac\b/i },
   { name: 'PC Büro Oben Alt', match: /oben alt/i },
@@ -51,7 +51,7 @@ const MACHINES: { name: string; match: RegExp }[] = [
   { name: 'Laptop Neu', match: /laptop neu/i },
 ]
 // Rechnername (hostname) → Name im Cockpit; sonst wählt Micha ihn einmal auf der Rechner-Seite aus
-const HOSTS: Record<string, string> = { 'desktop-i4gdm3o': 'PC Windows Computerzimmer' }
+const HOSTS: Record<string, string> = { 'desktop-b8rp1n5': 'PC Windows Computerzimmer' }
 async function detectMachine($: Eng): Promise<string> {
   const saved = (await $.store.get('thisMachine')) as string | undefined
   if (saved) return saved
@@ -187,6 +187,11 @@ async function scanPrograms($: Eng): Promise<{ roots: string[]; programs: Progra
   const h = await home($)
   const sep = sepOf(h)
   const bases = [h, join(sep, h, 'Desktop'), join(sep, h, 'Documents')]
+  // Windows: auch direkt auf dem Laufwerk suchen (z. B. C:\Micha\Programme Micha gebaut, C:\ClaudeCode)
+  if (sep === '\\') {
+    const drive = (await $.env.get('SystemDrive')) ?? 'C:'
+    bases.push(drive + '\\')
+  }
   const roots: string[] = []
   const dirs = async (p: string) => {
     try {
@@ -198,7 +203,7 @@ async function scanPrograms($: Eng): Promise<{ roots: string[]; programs: Progra
   for (const b of bases) {
     for (const e of await dirs(b)) {
       const p = join(sep, b, e.name)
-      if (/gebaut/i.test(e.name)) roots.push(p)
+      if (/gebaut|^claude ?code$/i.test(e.name)) roots.push(p)
       else if (/^micha$/i.test(e.name)) {
         for (const f of await dirs(p)) if (/gebaut/i.test(f.name)) roots.push(join(sep, p, f.name))
       }
