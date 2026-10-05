@@ -43,15 +43,19 @@ const MACHINES: { name: string; match: RegExp }[] = [
   { name: 'MacbookPro2019', match: /macbook|\bmac\b/i },
   { name: 'PC Büro Oben Alt', match: /oben alt/i },
   { name: 'PC Büro Oben Neu', match: /oben neu|win11_oben|neue[rn]? büro/i },
-  { name: 'PC HG Büro', match: /\bhg\b/i },
+  { name: 'PC HG Büro', match: /\bhg\b|desktop-i4gdm3o/i },
   { name: 'PC Micha Büro unten', match: /micha unten|büro unten/i },
-  { name: 'PC Werkstatt', match: /werkstatt/i },
+  { name: 'PC Werkstatt', match: /werkstatt|desktop-vfa6sdr/i },
   { name: 'PC Theke', match: /theke/i },
   { name: 'Laptop Alt', match: /laptop alt|laptop 1\b/i },
   { name: 'Laptop Neu', match: /laptop neu/i },
 ]
 // Rechnername (hostname) → Name im Cockpit; sonst wählt Micha ihn einmal auf der Rechner-Seite aus
-const HOSTS: Record<string, string> = { 'desktop-b8rp1n5': 'PC Windows Computerzimmer' }
+const HOSTS: Record<string, string> = {
+  'desktop-b8rp1n5': 'PC Windows Computerzimmer',
+  'desktop-i4gdm3o': 'PC HG Büro',
+  'desktop-vfa6sdr': 'PC Werkstatt',
+}
 async function detectMachine($: Eng): Promise<string> {
   const saved = (await $.store.get('thisMachine')) as string | undefined
   if (saved) return saved
@@ -149,7 +153,11 @@ async function loadRemote($: Eng): Promise<string> {
 }
 
 // Feste Zuordnung Session → Rechner (von Micha ausgewählt), dauerhaft gespeichert
-const SEED: Record<string, string> = { '52c45f': 'PC Windows Computerzimmer' }
+const SEED: Record<string, string> = {
+  '52c45f': 'PC Windows Computerzimmer', // Externe Festplatte erkennen Sichern
+  '27163b': 'PC Werkstatt', // Bitte remote control einschalten
+  '1aa3f3': 'PC Micha Büro unten', // Remote session aktivieren (vorläufig)
+}
 async function loadAssign($: Eng): Promise<Record<string, string>> {
   const saved = (await $.store.get('assign')) as Record<string, string> | undefined
   return { ...SEED, ...(saved ?? {}) }
@@ -205,7 +213,7 @@ async function scanPrograms($: Eng): Promise<{ roots: string[]; programs: Progra
       const p = join(sep, b, e.name)
       if (/gebaut|^claude ?code$/i.test(e.name)) roots.push(p)
       else if (/^micha$/i.test(e.name)) {
-        for (const f of await dirs(p)) if (/gebaut/i.test(f.name)) roots.push(join(sep, p, f.name))
+        for (const f of await dirs(p)) if (/gebaut|bau_|progs|programm/i.test(f.name)) roots.push(join(sep, p, f.name))
       }
     }
   }
