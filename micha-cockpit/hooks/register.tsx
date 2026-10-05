@@ -389,10 +389,10 @@ async function maybeTagTitle($: Eng) {
 }
 
 async function hideBar($: Eng) {
-  await $.store.set('hidden', true)
+  // nur für diese Session ausblenden – neue Sessions zeigen das Cockpit immer
   await update($, data, d => ({ ...d, hidden: true }))
   await $.ui.close({ id: PANE }).catch(() => undefined)
-  $.ui.toast('Cockpit ausgeblendet. Wieder einblenden: /cockpit ins Eingabefeld tippen.')
+  $.ui.toast('Cockpit in dieser Session ausgeblendet. Wieder einblenden: /cockpit ins Eingabefeld tippen.')
 }
 
 async function setThisMachine($: Eng, name: string) {
@@ -537,11 +537,14 @@ export const register: Register = on => {
     const started = await next(e)
     await $.command.register({ name: 'cockpit', description: 'Micha-Cockpit öffnen (Projekte, Rechner, Remote Control)' })
     const thisMachine = await detectMachine($)
-    const hidden = (await $.store.get('hidden')) === true
-    await update($, data, d => ({ ...d, thisMachine, hidden }))
+    // Altlast bis 0.5.2: „ausgeblendet“ galt für alle Sessions – zurücksetzen
+    if ((await $.store.get('hidden')) === true) await $.store.set('hidden', false)
+    await update($, data, d => ({ ...d, thisMachine }))
     void refresh($, false).catch(() => undefined)
     void maybeTagTitle($)
     void checkVersions($).catch(() => undefined)
+    // alle 30 Minuten auf eine neue Cockpit-Version prüfen
+    $.clock.every(30 * 60 * 1000, () => void checkVersions($).catch(() => undefined))
     return started
   })
 
@@ -552,7 +555,6 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'cockpit' }, async $ => {
-    await $.store.set('hidden', false)
     await update($, data, d => ({ ...d, hidden: false }))
     await openPage($, 'projekte')
     return { text: 'Micha-Cockpit geöffnet.' }
