@@ -153,16 +153,20 @@ async function loadRemote($: Eng): Promise<string> {
 }
 
 // Feste Zuordnung Session → Rechner (von Micha ausgewählt), dauerhaft gespeichert
+// Zuordnung über den Session-Titel: der ist auf allen Rechnern gleich (die Kurz-IDs nicht)
 const SEED: Record<string, string> = {
-  '52c45f': 'PC Windows Computerzimmer', // Externe Festplatte erkennen Sichern
-  '27163b': 'PC Werkstatt', // Bitte remote control einschalten
-  '1aa3f3': 'PC Micha Büro unten', // Remote session aktivieren (vorläufig)
+  'title:downloads-ordner inventar als pdf': 'MacbookPro2019',
+  'title:externe festplatte erkennen sichern': 'PC Windows Computerzimmer',
+  'title:bitte remote control einschalten': 'PC Werkstatt',
+  'title:remote session aktivieren': 'PC Micha Büro unten', // vorläufig
 }
+const tkey = (title: string) => 'title:' + title.trim().toLowerCase()
 async function loadAssign($: Eng): Promise<Record<string, string>> {
   const saved = (await $.store.get('assign')) as Record<string, string> | undefined
   return { ...SEED, ...(saved ?? {}) }
 }
-async function saveAssign($: Eng, id: string, machine: string) {
+async function saveAssign($: Eng, title: string, machine: string) {
+  const id = tkey(title)
   const all = await loadAssign($)
   if (machine === '-') delete all[id]
   else all[id] = machine
@@ -170,11 +174,11 @@ async function saveAssign($: Eng, id: string, machine: string) {
   await update($, data, d => ({
     ...d,
     assign: all,
-    peers: d.peers.map(p => (p.id === id ? { ...p, machine: machineOf(p.title, p.id, all) } : p)),
+    peers: d.peers.map(p => (tkey(p.title) === id ? { ...p, machine: machineOf(p.title, p.id, all) } : p)),
   }))
 }
 const machineOf = (title: string, id: string, assign: Record<string, string>) =>
-  assign[id] ?? MACHINES.find(x => x.match.test(title))?.name ?? 'Nicht zugeordnet'
+  assign[tkey(title)] ?? assign[id] ?? MACHINES.find(x => x.match.test(title))?.name ?? 'Nicht zugeordnet'
 
 async function loadPeers($: Eng, assign: Record<string, string>): Promise<Peer[]> {
   const text = await callTool($, 'ListAgents', {})
@@ -589,9 +593,9 @@ export const register: Register = on => {
           <pick.Select
             key={`as-${x.id}`}
             label="Rechner"
-            value={d.assign[x.id] ?? ''}
+            value={d.assign[tkey(x.title)] ?? d.assign[x.id] ?? ''}
             options={[...MACHINES.map(m => ({ value: m.name, label: m.name })), { value: '-', label: '(Zuordnung lösen)' }]}
-            onSelect={val => void saveAssign($, x.id, val)}
+            onSelect={val => void saveAssign($, x.title, val)}
           />
         )}
         </Box>
