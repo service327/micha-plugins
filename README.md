@@ -20,7 +20,16 @@ claude plugin install micha-cockpit@micha-plugins
 ```
 
 ## Aktualisieren
+Ab Version 0.5.0 einfach in der Cockpit-Leiste auf **„⬆ Update auf …“** klicken (erscheint, sobald auf
+GitHub eine neuere Version liegt; sonst steht dort „✓ v…“ – Klick darauf prüft sofort). Danach die
+Claude-App einmal ganz beenden und neu öffnen.
+
+Von Hand geht es weiterhin so:
 ```
 claude plugin marketplace update micha-plugins
 claude plugin update micha-cockpit@micha-plugins
 ```
+
+## Pflege
+Das Plugin wird vom PC Windows Computerzimmer aus gepflegt. Nach jeder Änderung die Version in
+`micha-cockpit/.claude-plugin/plugin.json` hochzählen, committen und pushen.

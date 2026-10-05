@@ -32,6 +32,9 @@ const DATA0: Data = {
   assign: {},
   thisMachine: '',
   hidden: false,
+  version: '',
+  latest: '',
+  updateState: '',
 }
 const view = atom({ plugin: 'micha-cockpit', key: 'view' } as const, VIEW0)
 const data = atom({ plugin: 'micha-cockpit', key: 'data' } as const, DATA0)
@@ -416,6 +419,104 @@ async function newSessionHere($: Eng, path: string, surface: Parameters<Eng['ui'
   $.ui.toast('Ordnerpfad kopiert. Oben links „Neue Session“ → Ordner wählen → Pfad einfügen.')
 }
 
+// ---------- Selbst-Update von GitHub ----------
+
+const LATEST_URL = 'https://raw.githubusercontent.com/service327/micha-plugins/main/micha-cockpit/.claude-plugin/plugin.json'
+
+// true, wenn Version a neuer ist als b (Format 1.2.3)
+function isNewer(a: string, b: string): boolean {
+  const pa = a.split('.').map(n => parseInt(n, 10) || 0)
+  const pb = b.split('.').map(n => parseInt(n, 10) || 0)
+  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) > (pb[i] ?? 0)
+  return false
+}
+
+async function checkVersions($: Eng) {
+  await update($, data, d => ({ ...d, updateState: d.updateState === 'neustart' ? 'neustart' : 'pruefe' }))
+  let version = ''
+  let latest = ''
+  try {
+    const root = $.plugin.root
+    const sep = sepOf(root)
+    version = String(JSON.parse(await $.fs.read(join(sep, root, '.claude-plugin', 'plugin.json'))).version ?? '')
+  } catch {
+    /* unbekannt */
+  }
+  try {
+    const r = await $.http.fetch(`${LATEST_URL}?t=${await $.clock.now()}`)
+    if (r.ok) latest = String(JSON.parse(r.text).version ?? '')
+  } catch {
+    /* offline – kein Problem */
+  }
+  await update($, data, d => ({ ...d, version, latest, updateState: d.updateState === 'neustart' ? 'neustart' : '' }))
+}
+
+// Wo liegt das claude-Programm? Bevorzugt das der Desktop-App (neueste Version), sonst „claude“ aus dem PATH.
+async function claudeExes($: Eng): Promise<string[]> {
+  const out: string[] = []
+  const h = await home($)
+  const isWin = sepOf(h) === '\\'
+  const appData = isWin ? ((await $.env.get('APPDATA')) ?? join('\\', h, 'AppData', 'Roaming')) : join('/', h, 'Library', 'Application Support')
+  const sep = sepOf(appData)
+  const base = join(sep, appData, 'Claude', 'claude-code')
+  const exeName = isWin ? 'claude.exe' : 'claude'
+  try {
+    const versions = (await $.fs.list(base)).filter(e => e.kind === 'dir').map(e => e.name)
+    versions.sort((a, b) => (isNewer(a, b) ? -1 : isNewer(b, a) ? 1 : 0))
+    for (const v of versions) {
+      // claude(.exe) liegt direkt im Versionsordner oder bis zu zwei Ebenen tiefer
+      const queue: { path: string; depth: number }[] = [{ path: join(sep, base, v), depth: 0 }]
+      while (queue.length) {
+        const cur = queue.shift()!
+        let entries: Awaited<ReturnType<Eng['fs']['list']>> = []
+        try {
+          entries = await $.fs.list(cur.path)
+        } catch {
+          continue
+        }
+        for (const e of entries) {
+          const p = join(sep, cur.path, e.name)
+          if (e.kind === 'file' && e.name.toLowerCase() === exeName) out.push(p)
+          else if (e.kind === 'dir' && cur.depth < 2) queue.push({ path: p, depth: cur.depth + 1 })
+        }
+      }
+      if (out.length) break
+    }
+  } catch {
+    /* keine Desktop-App-CLI gefunden */
+  }
+  out.push('claude')
+  return out
+}
+
+async function runSelfUpdate($: Eng) {
+  const d0 = await read($, data)
+  if (d0.updateState === 'laeuft') return
+  await update($, data, d => ({ ...d, updateState: 'laeuft' }))
+  $.ui.toast('Cockpit wird von GitHub aktualisiert …')
+  let ok = false
+  for (const exe of await claudeExes($)) {
+    try {
+      const a = await $.process.run([exe, 'plugin', 'marketplace', 'update', 'micha-plugins'], { timeoutMs: 180000 })
+      if (a.exitCode !== 0) continue
+      const b = await $.process.run([exe, 'plugin', 'update', 'micha-cockpit@micha-plugins'], { timeoutMs: 180000 })
+      if (b.exitCode === 0) {
+        ok = true
+        break
+      }
+    } catch {
+      /* nächstes Programm versuchen */
+    }
+  }
+  if (ok) {
+    await update($, data, d => ({ ...d, updateState: 'neustart' }))
+    $.ui.toast(`Cockpit ${d0.latest || ''} installiert. Bitte die Claude-App einmal ganz beenden und neu öffnen.`)
+  } else {
+    await update($, data, d => ({ ...d, updateState: 'fehler' }))
+    $.ui.toast('Update ging nicht automatisch. Bitte in einer Session sagen: „Bitte micha-cockpit aktualisieren“.')
+  }
+}
+
 // ---------- Anzeige ----------
 
 export const register: Register = on => {
@@ -427,6 +528,7 @@ export const register: Register = on => {
     await update($, data, d => ({ ...d, thisMachine, hidden }))
     void refresh($, false).catch(() => undefined)
     void maybeTagTitle($)
+    void checkVersions($).catch(() => undefined)
     return started
   })
 
@@ -453,6 +555,28 @@ export const register: Register = on => {
     const color = r === 'on' ? '#2E7D32' : r === 'connecting' ? '#B8860B' : '#6B7280'
     const label =
       r === 'on' ? '📡 Remote AN' : r === 'connecting' ? '📡 verbinde …' : r === 'unavailable' ? '📡 Remote n/v' : '📡 Remote AUS'
+    // Versions-/Update-Knopf
+    const hasUpdate = !!d.latest && !!d.version && isNewer(d.latest, d.version)
+    const verLabel =
+      d.updateState === 'laeuft'
+        ? '⏳ Update läuft …'
+        : d.updateState === 'neustart'
+          ? '🔄 App neu starten'
+          : d.updateState === 'pruefe'
+            ? `v${d.version || '?'} · prüfe …`
+            : hasUpdate
+              ? `⬆ Update auf ${d.latest}`
+              : d.updateState === 'fehler'
+                ? `⚠ v${d.version} · nochmal`
+                : `✓ v${d.version || '?'}`
+    const onVer = () => {
+      if (d.updateState === 'neustart') $.ui.toast('Bitte die Claude-App ganz beenden (auch unten rechts neben der Uhr) und neu öffnen.')
+      else if (hasUpdate || d.updateState === 'fehler') void runSelfUpdate($)
+      else void checkVersions($).then(async () => {
+        const n = await read($, data)
+        $.ui.toast(n.latest && isNewer(n.latest, n.version) ? `Neue Version ${n.latest} verfügbar.` : `Cockpit ist aktuell (v${n.version}).`)
+      })
+    }
     return (
       <Box flexDirection="row" gap={1} alignItems="center">
         <Text bold color="#E8B10C">
@@ -463,6 +587,13 @@ export const register: Register = on => {
         <Box backgroundColor={color} paddingX={1}>
           <Button key="mc-remote" plain label={label} onPress={() => void toggleRemote($)} />
         </Box>
+        {hasUpdate || d.updateState === 'neustart' ? (
+          <Box backgroundColor="#1D4ED8" paddingX={1}>
+            <Button key="mc-ver" plain label={verLabel} onPress={onVer} />
+          </Box>
+        ) : (
+          <Button key="mc-ver" plain dimColor label={verLabel} onPress={onVer} />
+        )}
         <Button key="mc-hide" plain dimColor label="✕" onPress={() => void hideBar($)} />
       </Box>
     )

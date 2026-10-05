@@ -36,6 +36,12 @@ export type Data = {
   assign: Record<string, string>
   thisMachine: string
   hidden: boolean
+  /** installierte Cockpit-Version (aus plugin.json) */
+  version: string
+  /** neueste Version auf GitHub ('' = unbekannt) */
+  latest: string
+  /** '' | 'pruefe' | 'laeuft' | 'neustart' | 'fehler' */
+  updateState: string
 }
 
 declare module 'claude-code' {
