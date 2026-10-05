@@ -50,6 +50,27 @@ const MACHINES: { name: string; match: RegExp }[] = [
   { name: 'Laptop Alt', match: /laptop alt|laptop 1\b/i },
   { name: 'Laptop Neu', match: /laptop neu/i },
 ]
+// Kürzel, das vorne in den Session-Titel kommt – daran erkennen alle Rechner, wo eine Session läuft
+const TAGS: Record<string, string> = {
+  'PC Windows Computerzimmer': 'Computerzimmer',
+  'iMac Computerzimmer': 'iMac',
+  MacbookPro2019: 'MacBook',
+  'PC Büro Oben Alt': 'Oben Alt',
+  'PC Büro Oben Neu': 'Oben Neu',
+  'PC HG Büro': 'HG',
+  'PC Micha Büro unten': 'Micha unten',
+  'PC Werkstatt': 'Werkstatt',
+  'PC Theke': 'Theke',
+  'Laptop Alt': 'Laptop Alt',
+  'Laptop Neu': 'Laptop Neu',
+}
+const machineOfTag = (title: string) => {
+  const m = title.match(/^\s*\[([^\]]+)\]/)
+  if (!m) return undefined
+  const tag = m[1].trim().toLowerCase()
+  return Object.keys(TAGS).find(k => TAGS[k].toLowerCase() === tag)
+}
+
 // Rechnername (hostname) → Name im Cockpit; sonst wählt Micha ihn einmal auf der Rechner-Seite aus
 const HOSTS: Record<string, string> = {
   'desktop-b8rp1n5': 'PC Windows Computerzimmer',
@@ -178,7 +199,7 @@ async function saveAssign($: Eng, title: string, machine: string) {
   }))
 }
 const machineOf = (title: string, id: string, assign: Record<string, string>) =>
-  assign[tkey(title)] ?? assign[id] ?? MACHINES.find(x => x.match.test(title))?.name ?? 'Nicht zugeordnet'
+  machineOfTag(title) ?? assign[tkey(title)] ?? assign[id] ?? MACHINES.find(x => x.match.test(title))?.name ?? 'Nicht zugeordnet'
 
 async function loadPeers($: Eng, assign: Record<string, string>): Promise<Peer[]> {
   const text = await callTool($, 'ListAgents', {})
@@ -306,6 +327,7 @@ async function toggleRemote($: Eng) {
     const state = (text.match(/\b(on|off|connecting|unavailable)\b/) ?? [])[1]
     await update($, data, x => ({ ...x, remote: state ?? (wantOn ? 'on' : 'off') }))
     $.ui.toast(wantOn ? 'Remote Control ist AN' : 'Remote Control ist AUS')
+    if (wantOn) void maybeTagTitle($)
   } catch (e) {
     await update($, data, x => ({ ...x, remote: d.remote }))
     $.ui.toast(`Remote Control: ${String((e as Error)?.message ?? e)}`)
@@ -326,6 +348,28 @@ async function toggleRemoteFor($: Eng, s: Session) {
     $.ui.toast(`${s.title}: Remote Control ${on ? 'AN' : 'AUS'}`)
   } catch (e) {
     $.ui.toast(`Remote Control: ${String((e as Error)?.message ?? e)}`)
+  }
+}
+
+let tagged = false
+async function maybeTagTitle($: Eng) {
+  if (tagged) return
+  const d = await read($, data)
+  const tag = TAGS[d.thisMachine]
+  if (!tag) return
+  try {
+    const self = JSON.parse(await callTool($, 'get_session', { session_id: 'self' }))
+    const title = String(self.title ?? '').trim()
+    const remoteOn = self.remoteControlState === 'on' || self.remoteControlActive === true
+    if (!remoteOn || !title || /^(new session|neue session|untitled)$/i.test(title)) return
+    if (/^\s*\[[^\]]+\]/.test(title)) {
+      tagged = true
+      return
+    }
+    await callTool($, 'set_session_title', { session_id: 'self', title: `[${tag}] ${title}` })
+    tagged = true
+  } catch {
+    /* später nochmal versuchen */
   }
 }
 
@@ -370,7 +414,14 @@ export const register: Register = on => {
     const hidden = (await $.store.get('hidden')) === true
     await update($, data, d => ({ ...d, thisMachine, hidden }))
     void refresh($, false).catch(() => undefined)
+    void maybeTagTitle($)
     return started
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const done = await next(e)
+    void maybeTagTitle($)
+    return done
   })
 
   on('command.run', { command: 'cockpit' }, async $ => {
