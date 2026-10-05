@@ -47,7 +47,7 @@ const MACHINES: { name: string; match: RegExp }[] = [
   { name: 'PC Büro Oben Alt', match: /oben alt/i },
   { name: 'PC Büro Oben Neu', match: /oben neu|win11_oben|neue[rn]? büro/i },
   { name: 'PC HG Büro', match: /\bhg\b/i },
-  { name: 'PC Micha Büro unten', match: /micha unten|büro unten/i },
+  { name: 'PC Micha Büro unten', match: /micha unten|büro unten|desktop-i4gdm3o/i },
   { name: 'PC Werkstatt', match: /werkstatt|desktop-vfa6sdr/i },
   { name: 'PC Theke', match: /theke/i },
   { name: 'Laptop Alt', match: /laptop alt|laptop 1\b/i },
@@ -77,7 +77,7 @@ const machineOfTag = (title: string) => {
 // Rechnername (hostname) → Name im Cockpit; sonst wählt Micha ihn einmal auf der Rechner-Seite aus
 const HOSTS: Record<string, string> = {
   'desktop-b8rp1n5': 'PC Windows Computerzimmer',
-  // desktop-i4gdm3o: noch unklar (HG Büro oder Micha Büro unten) – dort gilt die Auswahl „Dieser Rechner“
+  'desktop-i4gdm3o': 'PC Micha Büro unten', // von Micha am 05.10.2026 vor Ort bestätigt
   'desktop-vfa6sdr': 'PC Werkstatt',
 }
 async function detectMachine($: Eng): Promise<string> {
