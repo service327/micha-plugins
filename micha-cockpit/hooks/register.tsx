@@ -209,13 +209,16 @@ async function loadPeers($: Eng, assign: Record<string, string>): Promise<Peer[]
   const peers: Peer[] = []
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/ /g, ' ')
-    const m = line.match(/^\s*(.+?)\s*\[([0-9a-z]{4,})\](.*)$/i)
+    // Kennung = letzte eckige Klammer mit Hex-Ref (der Titel selbst kann „[Kürzel]“ enthalten)
+    const m = line.match(/^\s*(.+?)\s*\[([0-9a-f]{6,})\](.*)$/i) ?? line.match(/^\s*(.+?)\s*\[([0-9a-z]{4,})\](.*)$/i)
     if (!m || /^This session/i.test(line)) continue
     const title = m[1].trim()
-    const status = (m[3].match(/(idle|offline|working|busy|running|online|active)\s*$/i) ?? [])[1]?.toLowerCase() ?? 'unbekannt'
+    const status = (m[3].match(/(idle|offline|working|busy|running|online|active|requires_action)\s*$/i) ?? [])[1]?.toLowerCase() ?? 'unbekannt'
     peers.push({ title, id: m[2], status, machine: machineOf(title, m[2], assign) })
   }
-  if (peers.length === 0 && text.trim()) throw new Error('Rechner-Liste aus der Cloud konnte nicht gelesen werden')
+  // Nur ein Fehler, wenn Zeilen mit Kennung da waren, aber keine gelesen werden konnte – sonst gibt es einfach keine anderen Sessions
+  if (peers.length === 0 && /\[[0-9a-f]{6,}\]/i.test(text.replace(/^.*This session.*$/im, '')))
+    throw new Error(`Rechner-Liste konnte nicht gelesen werden: „${text.trim().split(/\r?\n/).slice(0, 3).join(' | ').slice(0, 160)}“`)
   return peers
 }
 
@@ -422,6 +425,7 @@ async function newSessionHere($: Eng, path: string, surface: Parameters<Eng['ui'
 // ---------- Selbst-Update von GitHub ----------
 
 const LATEST_URL = 'https://raw.githubusercontent.com/service327/micha-plugins/main/micha-cockpit/.claude-plugin/plugin.json'
+const LATEST_API = 'https://api.github.com/repos/service327/micha-plugins/contents/micha-cockpit/.claude-plugin/plugin.json?ref=main'
 
 // true, wenn Version a neuer ist als b (Format 1.2.3)
 function isNewer(a: string, b: string): boolean {
@@ -442,13 +446,22 @@ async function checkVersions($: Eng) {
   } catch {
     /* unbekannt */
   }
-  try {
-    const r = await $.http.fetch(`${LATEST_URL}?t=${await $.clock.now()}`)
-    if (r.ok) latest = String(JSON.parse(r.text).version ?? '')
-  } catch {
-    /* offline – kein Problem */
+  // Erst die GitHub-Schnittstelle (sofort aktuell), sonst raw.githubusercontent (bis zu 5 Min. zwischengespeichert)
+  for (const [url, headers] of [
+    [LATEST_API, { accept: 'application/vnd.github.raw', 'user-agent': 'micha-cockpit' }],
+    [`${LATEST_URL}?t=${await $.clock.now()}`, {}],
+  ] as const) {
+    try {
+      const r = await $.http.fetch(url, { headers })
+      if (r.ok) {
+        latest = String(JSON.parse(r.text).version ?? '')
+        if (latest) break
+      }
+    } catch {
+      /* nächste Quelle versuchen */
+    }
   }
-  await update($, data, d => ({ ...d, version, latest, updateState: d.updateState === 'neustart' ? 'neustart' : '' }))
+  await update($, data, d => ({ ...d, version, latest, updateState: d.updateState === 'neustart' ? 'neustart' : latest ? '' : 'offline' }))
 }
 
 // Wo liegt das claude-Programm? Bevorzugt das der Desktop-App (neueste Version), sonst „claude“ aus dem PATH.
@@ -568,13 +581,21 @@ export const register: Register = on => {
               ? `⬆ Update auf ${d.latest}`
               : d.updateState === 'fehler'
                 ? `⚠ v${d.version} · nochmal`
-                : `✓ v${d.version || '?'}`
+                : d.updateState === 'offline'
+                  ? `v${d.version || '?'} · GitHub?`
+                  : `✓ v${d.version || '?'}`
     const onVer = () => {
       if (d.updateState === 'neustart') $.ui.toast('Bitte die Claude-App ganz beenden (auch unten rechts neben der Uhr) und neu öffnen.')
       else if (hasUpdate || d.updateState === 'fehler') void runSelfUpdate($)
       else void checkVersions($).then(async () => {
         const n = await read($, data)
-        $.ui.toast(n.latest && isNewer(n.latest, n.version) ? `Neue Version ${n.latest} verfügbar.` : `Cockpit ist aktuell (v${n.version}).`)
+        $.ui.toast(
+          !n.latest
+            ? 'GitHub ist gerade nicht erreichbar – bitte später nochmal klicken.'
+            : isNewer(n.latest, n.version)
+              ? `Neue Version ${n.latest} verfügbar – nochmal klicken zum Aktualisieren.`
+              : `Cockpit ist aktuell (v${n.version}).`,
+        )
       })
     }
     return (

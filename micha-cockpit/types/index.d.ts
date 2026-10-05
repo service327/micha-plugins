@@ -40,7 +40,7 @@ export type Data = {
   version: string
   /** neueste Version auf GitHub ('' = unbekannt) */
   latest: string
-  /** '' | 'pruefe' | 'laeuft' | 'neustart' | 'fehler' */
+  /** '' | 'pruefe' | 'laeuft' | 'neustart' | 'fehler' | 'offline' */
   updateState: string
 }
 
