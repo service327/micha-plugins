@@ -43,7 +43,7 @@ const MACHINES: { name: string; match: RegExp }[] = [
   { name: 'MacbookPro2019', match: /macbook|\bmac\b/i },
   { name: 'PC Büro Oben Alt', match: /oben alt/i },
   { name: 'PC Büro Oben Neu', match: /oben neu|win11_oben|neue[rn]? büro/i },
-  { name: 'PC HG Büro', match: /\bhg\b|desktop-i4gdm3o/i },
+  { name: 'PC HG Büro', match: /\bhg\b/i },
   { name: 'PC Micha Büro unten', match: /micha unten|büro unten/i },
   { name: 'PC Werkstatt', match: /werkstatt|desktop-vfa6sdr/i },
   { name: 'PC Theke', match: /theke/i },
@@ -74,7 +74,7 @@ const machineOfTag = (title: string) => {
 // Rechnername (hostname) → Name im Cockpit; sonst wählt Micha ihn einmal auf der Rechner-Seite aus
 const HOSTS: Record<string, string> = {
   'desktop-b8rp1n5': 'PC Windows Computerzimmer',
-  'desktop-i4gdm3o': 'PC HG Büro',
+  // desktop-i4gdm3o: noch unklar (HG Büro oder Micha Büro unten) – dort gilt die Auswahl „Dieser Rechner“
   'desktop-vfa6sdr': 'PC Werkstatt',
 }
 async function detectMachine($: Eng): Promise<string> {
@@ -362,7 +362,16 @@ async function maybeTagTitle($: Eng) {
     const title = String(self.title ?? '').trim()
     const remoteOn = self.remoteControlState === 'on' || self.remoteControlActive === true
     if (!remoteOn || !title || /^(new session|neue session|untitled)$/i.test(title)) return
-    if (/^\s*\[[^\]]+\]/.test(title)) {
+    const m = title.match(/^\s*\[([^\]]+)\]\s*/)
+    if (m) {
+      const old = m[1].trim()
+      // fremdes/eigenes Kürzel stehen lassen; nur ein bekanntes, aber falsches Rechner-Kürzel austauschen
+      const known = Object.values(TAGS).some(t => t.toLowerCase() === old.toLowerCase())
+      if (!known || old.toLowerCase() === tag.toLowerCase()) {
+        tagged = true
+        return
+      }
+      await callTool($, 'set_session_title', { session_id: 'self', title: `[${tag}] ${title.slice(m[0].length)}` })
       tagged = true
       return
     }
@@ -383,6 +392,9 @@ async function hideBar($: Eng) {
 async function setThisMachine($: Eng, name: string) {
   await $.store.set('thisMachine', name)
   await update($, data, d => ({ ...d, thisMachine: name }))
+  // Rechner gewechselt → Kürzel im eigenen Session-Titel neu setzen bzw. austauschen
+  tagged = false
+  void maybeTagTitle($)
 }
 
 async function openSession($: Eng, s: Session) {
