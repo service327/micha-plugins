@@ -36,6 +36,7 @@ const DATA0: Data = {
   latest: '',
   updateState: '',
   autoRemote: true,
+  missingPerms: [],
 }
 const view = atom({ plugin: 'micha-cockpit', key: 'view' } as const, VIEW0)
 const data = atom({ plugin: 'micha-cockpit', key: 'data' } as const, DATA0)
@@ -325,6 +326,70 @@ async function openPage($: Eng, page: Page, path: string | null = null) {
   if (stale || peersStale) void refresh($, page === 'rechner')
 }
 
+// ---------- Erlaubnisse, die das Cockpit braucht (permissions.allow in ~/.claude/settings.json) ----------
+
+const NEEDED_PERMS = [
+  'mcp__ccd_session_mgmt__list_sessions',
+  'mcp__ccd_session_mgmt__get_session',
+  'mcp__ccd_session_mgmt__set_remote_control',
+  'mcp__ccd_session_mgmt__set_session_title',
+  'ListAgents',
+]
+
+async function settingsPath($: Eng): Promise<string> {
+  const h = await home($)
+  const sep = sepOf(h)
+  return join(sep, h, '.claude', 'settings.json')
+}
+
+async function checkPermissions($: Eng) {
+  let missing: string[] = []
+  try {
+    const cfg = JSON.parse(await $.fs.read(await settingsPath($)))
+    const allow: unknown = cfg?.permissions?.allow
+    const have = new Set(Array.isArray(allow) ? allow.map(String) : [])
+    missing = NEEDED_PERMS.filter(p => !have.has(p))
+  } catch {
+    missing = [...NEEDED_PERMS] // Datei fehlt oder ist nicht lesbar
+  }
+  await update($, data, d => ({ ...d, missingPerms: missing }))
+}
+
+// Nur auf Knopfdruck: ergänzt ausschließlich die fehlenden Einträge aus NEEDED_PERMS, ändert sonst nichts
+async function addPermissions($: Eng) {
+  const path = await settingsPath($)
+  let cfg: Record<string, unknown> = {}
+  try {
+    cfg = JSON.parse(await $.fs.read(path))
+  } catch (e) {
+    const exists = await $.fs.stat(path).then(() => true).catch(() => false)
+    if (exists) {
+      $.ui.toast('settings.json ist nicht lesbar – bitte nicht automatisch ändern. Claude in einer Session um Hilfe bitten.')
+      return
+    }
+  }
+  const perms = (cfg.permissions && typeof cfg.permissions === 'object' ? cfg.permissions : {}) as Record<string, unknown>
+  const allow = Array.isArray(perms.allow) ? perms.allow.map(String) : []
+  const added = NEEDED_PERMS.filter(p => !allow.includes(p))
+  if (added.length === 0) {
+    await checkPermissions($)
+    $.ui.toast('Alle Erlaubnisse sind schon eingetragen.')
+    return
+  }
+  cfg.permissions = { ...perms, allow: [...allow, ...added] }
+  try {
+    await $.fs.write(path, JSON.stringify(cfg, null, 2) + '\n')
+    await checkPermissions($)
+    $.ui.toast(`${added.length} Erlaubnis(se) für das Cockpit eingetragen. Falls etwas noch nicht geht: App einmal neu starten.`)
+    // jetzt erlaubt: Remote/Kürzel nochmal versuchen
+    autoRemoteDone = false
+    tagged = false
+    void maybeAutoRemote($).then(() => maybeTagTitle($))
+  } catch (e) {
+    $.ui.toast(`Eintragen ging nicht: ${String((e as Error)?.message ?? e)}`)
+  }
+}
+
 // Steht Remote auf „verbinde …“, alle 3 s nachfragen, bis die Verbindung steht (höchstens ~30 s)
 function settleRemote($: Eng, tries = 10) {
   $.clock.after(3000, () => {
@@ -594,6 +659,7 @@ export const register: Register = on => {
     if ((await $.store.get('hidden')) === true) await $.store.set('hidden', false)
     const autoRemote = (await $.store.get('autoRemote')) !== false
     await update($, data, d => ({ ...d, thisMachine, autoRemote }))
+    await checkPermissions($).catch(() => undefined)
     void refresh($, false).catch(() => undefined)
     void maybeAutoRemote($)
     void maybeTagTitle($)
@@ -665,6 +731,11 @@ export const register: Register = on => {
         <Box backgroundColor={color} paddingX={1}>
           <Button key="mc-remote" plain label={label} onPress={() => void toggleRemote($)} />
         </Box>
+        {d.missingPerms.length > 0 && (
+          <Box backgroundColor="#B45309" paddingX={1}>
+            <Button key="mc-perms" plain label={`🔑 Erlaubnisse einrichten (${d.missingPerms.length})`} onPress={() => void addPermissions($)} />
+          </Box>
+        )}
         {hasUpdate || d.updateState === 'neustart' ? (
           <Box backgroundColor="#1D4ED8" paddingX={1}>
             <Button key="mc-ver" plain label={verLabel} onPress={onVer} />

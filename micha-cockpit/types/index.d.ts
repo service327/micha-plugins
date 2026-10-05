@@ -44,6 +44,8 @@ export type Data = {
   updateState: string
   /** Remote Control beim Start automatisch einschalten (gilt für alle Sessions) */
   autoRemote: boolean
+  /** Erlaubnisse, die in ~/.claude/settings.json noch fehlen */
+  missingPerms: string[]
 }
 
 declare module 'claude-code' {
