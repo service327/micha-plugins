@@ -325,6 +325,23 @@ async function openPage($: Eng, page: Page, path: string | null = null) {
   if (stale || peersStale) void refresh($, page === 'rechner')
 }
 
+// Steht Remote auf „verbinde …“, alle 3 s nachfragen, bis die Verbindung steht (höchstens ~30 s)
+function settleRemote($: Eng, tries = 10) {
+  $.clock.after(3000, () => {
+    void (async () => {
+      let st = 'connecting'
+      try {
+        st = await loadRemote($)
+        await update($, data, x => ({ ...x, remote: st }))
+      } catch {
+        /* nächster Versuch */
+      }
+      if (st === 'connecting' && tries > 1) settleRemote($, tries - 1)
+      else if (st === 'on') void maybeTagTitle($)
+    })()
+  })
+}
+
 // Remote Control beim Start automatisch einschalten (Einstellung gilt für alle Sessions, Standard: an)
 let autoRemoteDone = false
 async function maybeAutoRemote($: Eng) {
@@ -346,6 +363,7 @@ async function maybeAutoRemote($: Eng) {
     autoRemoteDone = true
     await update($, data, x => ({ ...x, remote: state }))
     if (state === 'on' || state === 'connecting') void maybeTagTitle($)
+    if (state === 'connecting') settleRemote($)
   } catch {
     /* direkt beim Start evtl. noch nicht möglich – nach der nächsten Antwort nochmal */
   }
@@ -368,6 +386,7 @@ async function toggleRemote($: Eng) {
     await update($, data, x => ({ ...x, remote: state ?? (wantOn ? 'on' : 'off') }))
     $.ui.toast(wantOn ? 'Remote Control ist AN' : 'Remote Control ist AUS')
     if (wantOn) void maybeTagTitle($)
+    if (state === 'connecting') settleRemote($)
   } catch (e) {
     await update($, data, x => ({ ...x, remote: d.remote }))
     $.ui.toast(`Remote Control: ${String((e as Error)?.message ?? e)}`)
