@@ -42,6 +42,8 @@ export type Data = {
   latest: string
   /** '' | 'pruefe' | 'laeuft' | 'neustart' | 'fehler' | 'offline' */
   updateState: string
+  /** Remote Control beim Start automatisch einschalten (gilt für alle Sessions) */
+  autoRemote: boolean
 }
 
 declare module 'claude-code' {

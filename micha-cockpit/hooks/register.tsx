@@ -35,6 +35,7 @@ const DATA0: Data = {
   version: '',
   latest: '',
   updateState: '',
+  autoRemote: true,
 }
 const view = atom({ plugin: 'micha-cockpit', key: 'view' } as const, VIEW0)
 const data = atom({ plugin: 'micha-cockpit', key: 'data' } as const, DATA0)
@@ -324,7 +325,40 @@ async function openPage($: Eng, page: Page, path: string | null = null) {
   if (stale || peersStale) void refresh($, page === 'rechner')
 }
 
+// Remote Control beim Start automatisch einschalten (Einstellung gilt für alle Sessions, Standard: an)
+let autoRemoteDone = false
+async function maybeAutoRemote($: Eng) {
+  if (autoRemoteDone) return
+  if ((await $.store.get('autoRemote')) === false) {
+    autoRemoteDone = true
+    return
+  }
+  try {
+    const self = JSON.parse(await callTool($, 'get_session', { session_id: 'self' }))
+    const st = String(self.remoteControlState ?? (self.remoteControlActive ? 'on' : 'off'))
+    if (st === 'on' || st === 'connecting' || st === 'unavailable' || self.startedViaRemoteControl === true) {
+      autoRemoteDone = true
+      if (st === 'on') await update($, data, x => ({ ...x, remote: 'on' }))
+      return
+    }
+    const text = await callTool($, 'set_remote_control', { session_id: 'self', enabled: true })
+    const state = (text.match(/\b(on|off|connecting|unavailable)\b/) ?? [])[1] ?? 'on'
+    autoRemoteDone = true
+    await update($, data, x => ({ ...x, remote: state }))
+    if (state === 'on' || state === 'connecting') void maybeTagTitle($)
+  } catch {
+    /* direkt beim Start evtl. noch nicht möglich – nach der nächsten Antwort nochmal */
+  }
+}
+
+async function setAutoRemote($: Eng, on: boolean) {
+  await $.store.set('autoRemote', on)
+  await update($, data, x => ({ ...x, autoRemote: on }))
+  $.ui.toast(on ? 'Neue Sessions schalten Remote Control ab jetzt automatisch ein.' : 'Remote Control wird beim Start nicht mehr automatisch eingeschaltet.')
+}
+
 async function toggleRemote($: Eng) {
+  autoRemoteDone = true // von Hand geschaltet → nicht mehr automatisch eingreifen
   const d = await read($, data)
   const wantOn = d.remote !== 'on'
   await update($, data, x => ({ ...x, remote: 'connecting' }))
@@ -539,8 +573,10 @@ export const register: Register = on => {
     const thisMachine = await detectMachine($)
     // Altlast bis 0.5.2: „ausgeblendet“ galt für alle Sessions – zurücksetzen
     if ((await $.store.get('hidden')) === true) await $.store.set('hidden', false)
-    await update($, data, d => ({ ...d, thisMachine }))
+    const autoRemote = (await $.store.get('autoRemote')) !== false
+    await update($, data, d => ({ ...d, thisMachine, autoRemote }))
     void refresh($, false).catch(() => undefined)
+    void maybeAutoRemote($)
     void maybeTagTitle($)
     void checkVersions($).catch(() => undefined)
     // alle 30 Minuten auf eine neue Cockpit-Version prüfen
@@ -550,7 +586,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    void maybeTagTitle($)
+    void maybeAutoRemote($).then(() => maybeTagTitle($))
     return done
   })
 
@@ -837,6 +873,14 @@ export const register: Register = on => {
             />
           </Box>
         )}
+        <Box flexDirection="row" columnGap={1}>
+          <Button
+            key="auto-remote"
+            plain
+            label={d.autoRemote ? '📡 Remote beim Start: automatisch AN' : '📡 Remote beim Start: aus'}
+            onPress={() => void setAutoRemote($, !d.autoRemote)}
+          />
+        </Box>
         <Box flexDirection="column">
           {names.map(name => {
             const ps = byMachine.get(name) ?? []
