@@ -436,6 +436,45 @@ async function maybeAutoRemote($: Eng) {
   }
 }
 
+// Alte Sessions DIESES Rechners (aus list_sessions) ohne Kürzel – Kandidaten fürs Kennzeichnen
+const GENERIC_TITLE = /^(new session|neue session|untitled|\(ohne titel\))$/i
+function untaggedLocal(d: Data): Session[] {
+  return d.sessions.filter(s => !s.isSelf && s.title.trim() && !/^\s*\[[^\]]+\]/.test(s.title) && !GENERIC_TITLE.test(s.title.trim()))
+}
+
+// Nur auf Knopfdruck: setzt das Kürzel dieses Rechners vor die Titel seiner alten Sessions,
+// damit alle Rechner sehen, wo sie herkommen. Bei selbst vergebenen Titeln fragt die App nach.
+let tagging = false
+async function tagLocalSessions($: Eng) {
+  if (tagging) return
+  const d = await read($, data)
+  const tag = TAGS[d.thisMachine]
+  if (!tag) {
+    $.ui.toast('Bitte zuerst oben „Dieser Rechner“ auswählen.')
+    return
+  }
+  const todo = untaggedLocal(d)
+  if (todo.length === 0) {
+    $.ui.toast('Alle Sessions dieses Rechners haben schon ein Kürzel.')
+    return
+  }
+  tagging = true
+  $.ui.toast(`Kennzeichne ${todo.length} Session(s) mit [${tag}] … (bei selbst vergebenen Namen fragt die App kurz nach)`)
+  let ok = 0
+  let skipped = 0
+  for (const s of todo) {
+    try {
+      await callTool($, 'set_session_title', { session_id: s.id, title: `[${tag}] ${s.title.trim()}` })
+      ok++
+    } catch {
+      skipped++
+    }
+  }
+  tagging = false
+  $.ui.toast(`${ok} Session(s) gekennzeichnet${skipped ? `, ${skipped} übersprungen` : ''}.`)
+  void refresh($, true).catch(() => undefined)
+}
+
 async function setAutoRemote($: Eng, on: boolean) {
   await $.store.set('autoRemote', on)
   await update($, data, x => ({ ...x, autoRemote: on }))
@@ -1003,6 +1042,18 @@ export const register: Register = on => {
             onPress={() => void setAutoRemote($, !d.autoRemote)}
           />
         </Box>
+        {d.thisMachine && TAGS[d.thisMachine] && untaggedLocal(d).length > 0 && (
+          <Box flexDirection="column">
+            <Button
+              key="tag-local"
+              label={`🏷 Alte Sessions dieses Rechners mit [${TAGS[d.thisMachine]}] kennzeichnen (${untaggedLocal(d).length})`}
+              onPress={() => void tagLocalSessions($)}
+            />
+            <Text dimColor wrap="wrap">
+              Setzt das Kürzel vor die Namen der älteren Sessions auf diesem Rechner – dann sehen alle Rechner, wo sie herkommen. Einmal pro Rechner drücken.
+            </Text>
+          </Box>
+        )}
         <Box flexDirection="column">
           {names.map(name => {
             const ps = byMachine.get(name) ?? []
