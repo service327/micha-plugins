@@ -928,18 +928,35 @@ export const register: Register = on => {
     }
 
     // ----- Seite: Rechner -----
+    // Einsortieren: Kürzel/Zuordnung/Stichwort (p.machine); sonst eigene lokale Session → dieser Rechner;
+    // sonst laufend → „Nicht zugeordnet“, ausgeschaltet → „Ältere Sessions (Herkunft unbekannt)“
+    const UNASSIGNED = 'Nicht zugeordnet'
+    const OLD = 'Ältere Sessions (Herkunft unbekannt)'
+    const localTitles = new Set(d.sessions.map(s => tkey(s.title)))
+    const effMachine = (p: Peer) =>
+      p.machine !== UNASSIGNED
+        ? p.machine
+        : d.thisMachine && localTitles.has(tkey(p.title))
+          ? d.thisMachine
+          : p.status === 'offline'
+            ? OLD
+            : UNASSIGNED
     const byMachine = new Map<string, Peer[]>()
     for (const m of MACHINES) byMachine.set(m.name, [])
-    for (const p of d.peers) byMachine.set(p.machine, [...(byMachine.get(p.machine) ?? []), p])
+    for (const p of d.peers) {
+      const m = effMachine(p)
+      byMachine.set(m, [...(byMachine.get(m) ?? []), { ...p, machine: m }])
+    }
     const isOnline = (ps: Peer[]) => ps.some(p => p.status !== 'offline')
-    const rank = (n: string) => (n === 'Nicht zugeordnet' ? 2 : n === d.thisMachine || isOnline(byMachine.get(n) ?? []) ? 0 : 1)
+    const rank = (n: string) =>
+      n === OLD ? 3 : n === UNASSIGNED ? 2 : n === d.thisMachine || isOnline(byMachine.get(n) ?? []) ? 0 : 1
     const names = [...byMachine.keys()]
-      .filter(n => n !== 'Nicht zugeordnet' || (byMachine.get(n) ?? []).length > 0)
+      .filter(n => (n !== UNASSIGNED && n !== OLD) || (byMachine.get(n) ?? []).length > 0)
       .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
     const el = $.ui.resolve(e) as unknown as Record<string, unknown>
     const pick = 'Select' in el ? (el as unknown as { Select: ElementConstructor<SelectProps> }) : null
     const local = d.sessions.filter(s => !s.archived).slice(0, 12)
-    const peerRow = (x: Peer) => (
+    const peerRow = (x: Peer, withPick = true) => (
       <Box flexDirection="column" marginBottom={1}>
         <Box flexDirection="row" gap={1}>
           <Text color={x.status !== 'offline' ? '#2E7D32' : '#6B7280'}>{x.status !== 'offline' ? '●' : '○'}</Text>
@@ -947,11 +964,11 @@ export const register: Register = on => {
         </Box>
         <Box flexDirection="row" flexWrap="wrap" columnGap={1} paddingLeft={2}>
         <Text dimColor>{x.status === 'idle' ? 'online, wartet' : x.status === 'offline' ? 'aus' : x.status}</Text>
-        {pick && (
+        {pick && withPick && (
           <pick.Select
             key={`as-${x.id}`}
             label="Rechner"
-            value={d.assign[tkey(x.title)] ?? d.assign[x.id] ?? ''}
+            value={x.machine !== UNASSIGNED && x.machine !== OLD ? x.machine : ''}
             options={[...MACHINES.map(m => ({ value: m.name, label: m.name })), { value: '-', label: '(Zuordnung lösen)' }]}
             onSelect={val => void saveAssign($, x.title, val)}
           />
@@ -1004,7 +1021,7 @@ export const register: Register = on => {
                   />
                   <Text dimColor>
                     {here ? 'dieser Rechner · ' : ''}
-                    {online ? 'online' : 'offline'}
+                    {online ? 'online' : name === OLD ? 'ausgeschaltet' : 'offline'}
                     {ps.length ? ` · ${ps.length} Session${ps.length > 1 ? 's' : ''}` : ''}
                   </Text>
                 </Box>
@@ -1025,7 +1042,15 @@ export const register: Register = on => {
                     ))}
                   </Box>
                 )}
-                {isOpen && !here && (
+                {isOpen && name === OLD && (
+                  <Box flexDirection="column" paddingLeft={3}>
+                    <Text dimColor wrap="wrap">
+                      Alte, ausgeschaltete Sessions ohne Rechner-Kürzel. Von welchem Rechner sie stammen, lässt sich nicht mehr feststellen – sie stören nicht. Neue Sessions bekommen ihr Kürzel automatisch.
+                    </Text>
+                    {ps.map(x => peerRow(x, false))}
+                  </Box>
+                )}
+                {isOpen && !here && name !== OLD && (
                   <Box flexDirection="column" paddingLeft={3}>
                     {ps.filter(x => x.status !== 'offline').length === 0 && <Text dimColor>Keine Session mit eingeschaltetem Remote Control.</Text>}
                     {ps.filter(x => x.status !== 'offline').length > 0 && <Text bold>Eingeschaltet (online)</Text>}
