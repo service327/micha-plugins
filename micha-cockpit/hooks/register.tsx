@@ -597,7 +597,20 @@ async function claudeExes($: Eng): Promise<string[]> {
     const versions = (await $.fs.list(base)).filter(e => e.kind === 'dir').map(e => e.name)
     versions.sort((a, b) => (isNewer(a, b) ? -1 : isNewer(b, a) ? 1 : 0))
     for (const v of versions) {
-      // claude(.exe) liegt direkt im Versionsordner oder bis zu zwei Ebenen tiefer
+      // Mac: gezielt <Version>/<Kennung>/claude.app/Contents/MacOS/claude prüfen (liegt 4 Ebenen tief)
+      if (!isWin) {
+        try {
+          for (const s of (await $.fs.list(join(sep, base, v))).filter(e => e.kind === 'dir')) {
+            const p = join(sep, base, v, s.name, 'claude.app', 'Contents', 'MacOS', 'claude')
+            if (await $.fs.stat(p).then(() => true).catch(() => false)) out.push(p)
+          }
+        } catch {
+          /* weiter mit der allgemeinen Suche */
+        }
+        if (out.length) break
+      }
+      // allgemein: claude(.exe) im Versionsordner oder darunter (Windows bis 2, Mac bis 4 Ebenen)
+      const maxDepth = isWin ? 2 : 4
       const queue: { path: string; depth: number }[] = [{ path: join(sep, base, v), depth: 0 }]
       while (queue.length) {
         const cur = queue.shift()!
@@ -610,7 +623,7 @@ async function claudeExes($: Eng): Promise<string[]> {
         for (const e of entries) {
           const p = join(sep, cur.path, e.name)
           if (e.kind === 'file' && e.name.toLowerCase() === exeName) out.push(p)
-          else if (e.kind === 'dir' && cur.depth < 2) queue.push({ path: p, depth: cur.depth + 1 })
+          else if (e.kind === 'dir' && cur.depth < maxDepth) queue.push({ path: p, depth: cur.depth + 1 })
         }
       }
       if (out.length) break
