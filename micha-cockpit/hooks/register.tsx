@@ -81,6 +81,8 @@ const HOSTS: Record<string, string> = {
   'desktop-b8rp1n5': 'PC Windows Computerzimmer',
   'desktop-i4gdm3o': 'PC Micha Büro unten', // von Micha am 05.10.2026 vor Ort bestätigt
   'desktop-vfa6sdr': 'PC Werkstatt',
+  'win11_oben': 'PC Büro Oben Neu', // von Micha am 05.10.2026 bestätigt
+  'desktop-4puo7vo': 'PC Büro Oben Alt', // von Micha am 05.10.2026 bestätigt
 }
 async function detectMachine($: Eng): Promise<string> {
   const saved = (await $.store.get('thisMachine')) as string | undefined
