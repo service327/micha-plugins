@@ -1,6 +1,6 @@
 {
   "name": "micha-cockpit",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Micha-Cockpit: Projekte, Sessions, Rechner und Remote Control auf einen Blick",
   "types": "./types/index.d.ts",
   "author": {

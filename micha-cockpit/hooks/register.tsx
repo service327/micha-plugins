@@ -136,10 +136,13 @@ function ago(now: number, ms: number): string {
 
 // ---------- Werkzeuge der App aufrufen ----------
 
+// Liste merken, aber neu holen, wenn ein Werkzeug fehlt: direkt beim Start bietet die App manche
+// Werkzeuge (z. B. set_remote_control) noch nicht an – sonst bliebe es bis zum Neustart „nicht verfügbar“
 let toolNames: string[] | null = null
 async function toolName($: Eng, suffix: string): Promise<string | null> {
-  if (!toolNames) toolNames = (await $.tool.list()).map(t => t.name)
-  return toolNames.find(n => n === suffix || n.endsWith('__' + suffix)) ?? null
+  const find = () => toolNames?.find(n => n === suffix || n.endsWith('__' + suffix)) ?? null
+  if (!find()) toolNames = (await $.tool.list()).map(t => t.name)
+  return find()
 }
 async function callTool($: Eng, suffix: string, args: Record<string, unknown>): Promise<string> {
   const name = await toolName($, suffix)
