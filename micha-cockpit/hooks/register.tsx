@@ -424,9 +424,16 @@ async function maybeAutoRemote($: Eng) {
   try {
     const self = JSON.parse(await callTool($, 'get_session', { session_id: 'self' }))
     const st = String(self.remoteControlState ?? (self.remoteControlActive ? 'on' : 'off'))
-    if (st === 'on' || st === 'connecting' || st === 'unavailable' || self.startedViaRemoteControl === true) {
+    if (st === 'on' || st === 'connecting' || self.startedViaRemoteControl === true) {
       autoRemoteDone = true
-      if (st === 'on') await update($, data, x => ({ ...x, remote: 'on' }))
+      await update($, data, x => ({ ...x, remote: st }))
+      if (st === 'connecting') settleRemote($)
+      return
+    }
+    // beim Öffnen einer alten Session evtl. nur vorübergehend „unavailable“ – nachfassen
+    if (st === 'unavailable') {
+      await update($, data, x => ({ ...x, remote: st }))
+      retryAutoRemote($)
       return
     }
     const text = await callTool($, 'set_remote_control', { session_id: 'self', enabled: true })
@@ -436,8 +443,30 @@ async function maybeAutoRemote($: Eng) {
     if (state === 'on' || state === 'connecting') void maybeTagTitle($)
     if (state === 'connecting') settleRemote($)
   } catch {
-    /* direkt beim Start evtl. noch nicht möglich – nach der nächsten Antwort nochmal */
+    /* direkt beim Start evtl. noch nicht möglich – gleich nochmal, nicht erst nach der nächsten Antwort */
+    retryAutoRemote($)
   }
+}
+
+// Beim Wieder-Öffnen einer alten Session ist die App oft noch nicht so weit: alle 5 s nachfassen,
+// höchstens 2 Minuten lang. Wer Remote von Hand schaltet, setzt autoRemoteDone und beendet das Nachfassen.
+let autoRemoteTries = 0
+let autoRemoteWaiting = false
+function retryAutoRemote($: Eng) {
+  if (autoRemoteDone || autoRemoteWaiting || autoRemoteTries >= 24) return
+  autoRemoteWaiting = true
+  autoRemoteTries++
+  $.clock.after(5000, () => {
+    autoRemoteWaiting = false
+    void maybeAutoRemote($).then(() => maybeTagTitle($))
+  })
+}
+
+// Anzeige aktuell halten – die App kann Remote auch selbst ein- oder ausschalten
+async function syncRemote($: Eng) {
+  const st = await loadRemote($)
+  const d = await read($, data)
+  if (d.remote !== st && d.remote !== 'connecting') await update($, data, x => ({ ...x, remote: st }))
 }
 
 // Alte Sessions DIESES Rechners (aus list_sessions) ohne Kürzel – Kandidaten fürs Kennzeichnen
@@ -724,6 +753,8 @@ export const register: Register = on => {
     void checkVersions($).catch(() => undefined)
     // alle 30 Minuten auf eine neue Cockpit-Version prüfen
     $.clock.every(30 * 60 * 1000, () => void checkVersions($).catch(() => undefined))
+    // alle 30 Sekunden den Remote-Stand dieser Session nachsehen, damit der Knopf stimmt
+    $.clock.every(30 * 1000, () => void syncRemote($).catch(() => undefined))
     return started
   })
 
@@ -1075,8 +1106,10 @@ export const register: Register = on => {
                     onPress={() => void update($, view, x => ({ ...x, openMachine: x.openMachine === name ? null : name }))}
                   />
                   <Text dimColor>
-                    {here ? 'dieser Rechner · ' : ''}
-                    {online ? 'online' : name === OLD ? 'ausgeschaltet' : 'offline'}
+                    {/* Der eigene Rechner ist immer grün – das heißt nur „eingeschaltet“, nicht „Remote an“ */}
+                    {here
+                      ? `dieser Rechner · eingeschaltet · diese Session: Remote ${d.remote === 'on' ? 'AN' : d.remote === 'connecting' ? 'verbindet …' : 'AUS'}`
+                      : online ? 'online' : name === OLD ? 'ausgeschaltet' : 'offline'}
                     {ps.length ? ` · ${ps.length} Session${ps.length > 1 ? 's' : ''}` : ''}
                   </Text>
                 </Box>
